@@ -190,6 +190,7 @@ func CreateWCOW(ctx context.Context, opts *OptionsWCOW) (_ *UtilityVM, err error
 		vpciDevices:             make(map[string]*VPCIDevice),
 		physicallyBacked:        !opts.AllowOvercommit,
 		devicesPhysicallyBacked: opts.FullyPhysicallyBacked,
+		createOpts:              *opts,
 	}
 
 	defer func() {
@@ -247,11 +248,7 @@ func CreateWCOW(ctx context.Context, opts *OptionsWCOW) (_ *UtilityVM, err error
 			},
 		}
 
-		uvm.scsiLocations[0][0] = &SCSIMount{
-			vm:       uvm,
-			HostPath: doc.VirtualMachine.Devices.Scsi["0"].Attachments["0"].Path,
-			refCount: 1,
-		}
+		uvm.scsiLocations[0][0] = newSCSIMount(uvm, doc.VirtualMachine.Devices.Scsi["0"].Attachments["0"].Path, "", "", 1, 0, 0, false)
 	} else {
 		doc.VirtualMachine.RestoreState = &hcsschema.RestoreState{}
 		doc.VirtualMachine.RestoreState.TemplateSystemId = opts.TemplateConfig.UVMID
@@ -280,9 +277,7 @@ func CreateWCOW(ctx context.Context, opts *OptionsWCOW) (_ *UtilityVM, err error
 	// Add appropriate VSMB share options if this UVM needs to be saved as a template
 	if opts.IsTemplate {
 		for _, share := range doc.VirtualMachine.Devices.VirtualSmb.Shares {
-			share.Options.PseudoDirnotify = true
-			share.Options.NoLocks = true
-			share.Options.NoDirectmap = true
+			uvm.SetSaveableVSMBOptions(share.Options, share.Options.ReadOnly)
 		}
 		uvm.IsTemplate = true
 	}

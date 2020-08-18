@@ -38,6 +38,8 @@ const (
 	VMAccessTypeIndividual
 )
 
+const scsiCurrentSerialVersionID = 1
+
 var (
 	ErrNoAvailableLocation      = fmt.Errorf("no available location")
 	ErrNotAttached              = fmt.Errorf("not attached")
@@ -77,29 +79,33 @@ type SCSIMount struct {
 	ReadOnly bool
 	// "VirtualDisk" or "PassThru" disk attachment type.
 	AttachmentType string
+	// serialization ID
+	serialVersionID uint32
 }
 
 func (sm *SCSIMount) logFormat() logrus.Fields {
 	return logrus.Fields{
-		"HostPath":   sm.HostPath,
-		"UVMPath":    sm.UVMPath,
-		"isLayer":    sm.isLayer,
-		"refCount":   sm.refCount,
-		"Controller": sm.Controller,
-		"LUN":        sm.LUN,
+		"HostPath":        sm.HostPath,
+		"UVMPath":         sm.UVMPath,
+		"isLayer":         sm.isLayer,
+		"refCount":        sm.refCount,
+		"Controller":      sm.Controller,
+		"LUN":             sm.LUN,
+		"SerialVersionID": sm.serialVersionID,
 	}
 }
 
 func newSCSIMount(uvm *UtilityVM, hostPath, uvmPath, attachmentType string, refCount uint32, controller int, lun int32, readOnly bool) *SCSIMount {
 	return &SCSIMount{
-		vm:             uvm,
-		HostPath:       hostPath,
-		UVMPath:        uvmPath,
-		refCount:       refCount,
-		Controller:     controller,
-		LUN:            int32(lun),
-		ReadOnly:       readOnly,
-		AttachmentType: attachmentType,
+		vm:              uvm,
+		HostPath:        hostPath,
+		UVMPath:         uvmPath,
+		refCount:        refCount,
+		Controller:      controller,
+		LUN:             int32(lun),
+		ReadOnly:        readOnly,
+		AttachmentType:  attachmentType,
+		serialVersionID: scsiCurrentSerialVersionID,
 	}
 }
 
@@ -369,6 +375,9 @@ func (sm *SCSIMount) GobEncode() ([]byte, error) {
 	encoder := gob.NewEncoder(&buf)
 	errMsgFmt := "failed to encode SCSIMount: %s"
 	// encode only the fields that can be safely deserialized.
+	if err := encoder.Encode(sm.serialVersionID); err != nil {
+		return []byte{}, fmt.Errorf(errMsgFmt, err)
+	}
 	if err := encoder.Encode(sm.HostPath); err != nil {
 		return nil, fmt.Errorf(errMsgFmt, err)
 	}
@@ -397,6 +406,12 @@ func (sm *SCSIMount) GobDecode(data []byte) error {
 	decoder := gob.NewDecoder(buf)
 	errMsgFmt := "failed to decode SCSIMount: %s"
 	// fields should be decoded in the same order in which they were encoded.
+	if err := decoder.Decode(&sm.serialVersionID); err != nil {
+		return fmt.Errorf(errMsgFmt, err)
+	}
+	if sm.serialVersionID != scsiCurrentSerialVersionID {
+		return fmt.Errorf("Serialized version of SCSIMount: %d doesn't match with the current version: %d", sm.serialVersionID, scsiCurrentSerialVersionID)
+	}
 	if err := decoder.Decode(&sm.HostPath); err != nil {
 		return fmt.Errorf(errMsgFmt, err)
 	}
@@ -493,4 +508,8 @@ func (sm *SCSIMount) Clone(ctx context.Context, vm *UtilityVM, cd *cloneData) er
 	vm.scsiLocations[sm.Controller][sm.LUN] = clonedScsiMount
 
 	return nil
+}
+
+func (sm *SCSIMount) GetSerialVersionID() uint32 {
+	return scsiCurrentSerialVersionID
 }
